@@ -1,14 +1,13 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2019 Epic Games, Inc. All Rights Reserved.
 
 #include "ProjectCleaner.h"
 #include "ProjectCleanerStyle.h"
 #include "ProjectCleanerCommands.h"
 #include "Misc/MessageDialog.h"
-#include "ToolMenus.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "AssetRegistryModule.h"
+#include "LevelEditor.h"
 #include "ObjectTools.h"
-#include "ContentBrowser/Private/FrontendFilters.h"
-#include "Containers/Set.h"
 
 static const FName ProjectCleanerTabName("ProjectCleaner");
 
@@ -29,19 +28,28 @@ void FProjectCleanerModule::StartupModule()
 		FProjectCleanerCommands::Get().PluginAction,
 		FExecuteAction::CreateRaw(this, &FProjectCleanerModule::PluginButtonClicked),
 		FCanExecuteAction());
+		
+	FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>("LevelEditor");
+	
+	{
+		TSharedPtr<FExtender> MenuExtender = MakeShareable(new FExtender());
+		MenuExtender->AddMenuExtension("WindowLayout", EExtensionHook::After, PluginCommands, FMenuExtensionDelegate::CreateRaw(this, &FProjectCleanerModule::AddMenuExtension));
 
-	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FProjectCleanerModule::RegisterMenus));
+		LevelEditorModule.GetMenuExtensibilityManager()->AddExtender(MenuExtender);
+	}
+	
+	{
+		TSharedPtr<FExtender> ToolbarExtender = MakeShareable(new FExtender);
+		ToolbarExtender->AddToolBarExtension("Settings", EExtensionHook::After, PluginCommands, FToolBarExtensionDelegate::CreateRaw(this, &FProjectCleanerModule::AddToolbarExtension));
+		
+		LevelEditorModule.GetToolBarExtensibilityManager()->AddExtender(ToolbarExtender);
+	}
 }
 
 void FProjectCleanerModule::ShutdownModule()
 {
 	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
 	// we call this function before unloading the module.
-
-	UToolMenus::UnRegisterStartupCallback(this);
-
-	UToolMenus::UnregisterOwner(this);
-
 	FProjectCleanerStyle::Shutdown();
 
 	FProjectCleanerCommands::Unregister();
@@ -82,40 +90,20 @@ void FProjectCleanerModule::PluginButtonClicked()
 		int32 DeletedAsssetNum = this->DeleteUnusedAssets(AllGameAsssets);
 
 		DialogText = FText::Format(
-								LOCTEXT("PluginButtonDialogText", "Deleted {0} assets."),
-								DeletedAsssetNum
-						   );
+			LOCTEXT("PluginButtonDialogText", "Deleted {0} assets."),
+			DeletedAsssetNum
+		);
 	}
 
 	FMessageDialog::Open(EAppMsgType::Ok, DialogText);
 }
 
-void FProjectCleanerModule::RegisterMenus()
+void FProjectCleanerModule::AddMenuExtension(FMenuBuilder& Builder)
 {
-	// Owner will be used for cleanup in call to UToolMenus::UnregisterOwner
-	FToolMenuOwnerScoped OwnerScoped(this);
-
-	{
-		UToolMenu* Menu = UToolMenus::Get()->ExtendMenu("LevelEditor.MainMenu.Window");
-		{
-			FToolMenuSection& Section = Menu->FindOrAddSection("WindowLayout");
-			Section.AddMenuEntryWithCommandList(FProjectCleanerCommands::Get().PluginAction, PluginCommands);
-		}
-	}
-
-	{
-		UToolMenu* ToolbarMenu = UToolMenus::Get()->ExtendMenu("LevelEditor.LevelEditorToolBar");
-		{
-			FToolMenuSection& Section = ToolbarMenu->FindOrAddSection("Settings");
-			{
-				FToolMenuEntry& Entry = Section.AddEntry(FToolMenuEntry::InitToolBarButton(FProjectCleanerCommands::Get().PluginAction));
-				Entry.SetCommandList(PluginCommands);
-			}
-		}
-	}
+	Builder.AddMenuEntry(FProjectCleanerCommands::Get().PluginAction);
 }
 
-void FProjectCleanerModule::GetAllDependencies(const FARFilter& InAssetRegistryFilter, const IAssetRegistry& AssetRegistry, TSet<FName>& OutDependencySet)
+void FProjectCleanerModule::GetAllDependencies(const FARFilter & InAssetRegistryFilter, const IAssetRegistry & AssetRegistry, TSet<FName>& OutDependencySet)
 {
 	TArray<FName> PackageNamesToProcess;
 	{
@@ -145,18 +133,22 @@ void FProjectCleanerModule::GetAllDependencies(const FARFilter& InAssetRegistryF
 		}
 	}
 }
-#if WITH_EDITOR
+
 int32 FProjectCleanerModule::DeleteUnusedAssets(TArray<FAssetData>& AssetsToDelete)
 {
 	if (AssetsToDelete.Num() > 0)
-	{		
+	{
 		int32 DeletedAssetsNum = ObjectTools::DeleteAssets(AssetsToDelete);
 		return DeletedAssetsNum;
 	}
 
 	return 0;
 }
-#endif
+
+void FProjectCleanerModule::AddToolbarExtension(FToolBarBuilder& Builder)
+{
+	Builder.AddToolBarButton(FProjectCleanerCommands::Get().PluginAction);
+}
 
 #undef LOCTEXT_NAMESPACE
 	
